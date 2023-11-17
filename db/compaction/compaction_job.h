@@ -46,6 +46,8 @@
 #include "util/stop_watch.h"
 #include "util/thread_local.h"
 
+#include "parquet/compaction_parquet_outputs.h"
+
 namespace ROCKSDB_NAMESPACE {
 
 class Arena;
@@ -273,9 +275,16 @@ class CompactionJob {
                                     const Slice& next_table_min_key,
                                     const Slice* comp_start_user_key,
                                     const Slice* comp_end_user_key);
+  Status FinishParquetOutputFile(const Status& input_status,
+                                 SubcompactionState* sub_compact,
+                                 CompactionParquetOutputs& parquetOutputs);
   Status InstallCompactionResults(const MutableCFOptions& mutable_cf_options);
   Status OpenCompactionOutputFile(SubcompactionState* sub_compact,
-                                  CompactionOutputs& outputs);
+                                  CompactionOutputs& outputs,
+                                  uint64_t file_number);
+  Status OpenParquetOutputFile(SubcompactionState* sub_compact,
+                               CompactionParquetOutputs& outputs,
+                               uint64_t file_number);
   void UpdateCompactionJobStats(
       const InternalStats::CompactionStats& stats) const;
   void RecordDroppedKeys(const CompactionIterationStats& c_iter_stats,

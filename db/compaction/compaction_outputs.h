@@ -19,9 +19,9 @@
 namespace ROCKSDB_NAMESPACE {
 
 class CompactionOutputs;
-using CompactionFileOpenFunc = std::function<Status(CompactionOutputs&)>;
+using CompactionFileOpenFunc = std::function<Status(CompactionOutputs&, CompactionParquetOutputs&)>;
 using CompactionFileCloseFunc =
-    std::function<Status(CompactionOutputs&, const Status&, const Slice&)>;
+    std::function<Status(CompactionOutputs&, CompactionParquetOutputs&, const Status&, const Slice&)>;
 
 // Files produced by subcompaction, most of the functions are used by
 // compaction_job Open/Close compaction file functions.

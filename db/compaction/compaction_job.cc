@@ -1299,18 +1299,41 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   // define the open and close functions for the compaction files, which will be
   // used open/close output files when needed.
   const CompactionFileOpenFunc open_file_func =
-      [this, sub_compact](CompactionOutputs& outputs) {
-        return this->OpenCompactionOutputFile(sub_compact, outputs);
+      [this, sub_compact](
+          CompactionOutputs& outputs,
+          CompactionParquetOutputs& parquetOutputs) {
+        assert(sub_compact != nullptr);
+
+        // no need to lock because VersionSet::next_file_number_ is atomic
+        uint64_t file_number = versions_->NewFileNumber();
+
+        Status compact_s = this->OpenCompactionOutputFile(sub_compact, outputs, file_number);
+
+        Status parquet_s = this->OpenParquetOutputFile(sub_compact, parquetOutputs, file_number);
+        
+        // TODO: Check parquet status
+
+        return compact_s
       };
 
   const CompactionFileCloseFunc close_file_func =
       [this, sub_compact, start_user_key, end_user_key](
-          CompactionOutputs& outputs, const Status& status,
+          CompactionOutputs& outputs,
+          CompactionParquetOutputs& parquetOutputs, 
+          const Status& status,
           const Slice& next_table_min_key) {
-        return this->FinishCompactionOutputFile(
+
+        Status compact_s = this->FinishCompactionOutputFile(
             status, sub_compact, outputs, next_table_min_key,
             sub_compact->start.has_value() ? &start_user_key : nullptr,
             sub_compact->end.has_value() ? &end_user_key : nullptr);
+        
+        Status parquet_s = this->FinishParquetOutputFile(
+            status, sub_compact, parquetOutputs);
+        
+        // TODO: Check parquet status
+
+        return compact_s;
       };
 
   Status status;
@@ -1686,6 +1709,15 @@ Status CompactionJob::FinishCompactionOutputFile(
   return s;
 }
 
+Status CompactionJob::FinishParquetOutputFile(const Status& input_status, CompactionParquetOutputs& parquetOutputs) {
+  Status s;
+  // Finish and check for file errors
+  IOStatus io_s = parquetOutputs.WriterSyncClose(input_status, db_options_.use_fsync);
+  s = io_s;
+
+  return s;
+}
+
 Status CompactionJob::InstallCompactionResults(
     const MutableCFOptions& mutable_cf_options) {
   assert(compact_);
@@ -1798,11 +1830,9 @@ void CompactionJob::RecordCompactionIOStats() {
 }
 
 Status CompactionJob::OpenCompactionOutputFile(SubcompactionState* sub_compact,
-                                               CompactionOutputs& outputs) {
-  assert(sub_compact != nullptr);
+                                               CompactionOutputs& outputs,
+                                               uint64_t file_number) {
 
-  // no need to lock because VersionSet::next_file_number_ is atomic
-  uint64_t file_number = versions_->NewFileNumber();
   std::string fname = GetTableFileName(file_number);
   // Fire events.
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
@@ -1934,6 +1964,51 @@ Status CompactionJob::OpenCompactionOutputFile(SubcompactionState* sub_compact,
   outputs.NewBuilder(tboptions);
 
   LogFlush(db_options_.info_log);
+  return s;
+}
+
+// Opens a parquet output file to side by side with a compaction output file
+// Mirrors the name (except for suffix), as well as the temperature of the file
+Status CompactionJob::OpenParquetOutputFile(SubcompactionState* sub_compact,
+                                            CompactionParquetOutputs& outputs,
+                                            uint64_t file_number) {
+  std::string fname = ParquetFileName(compact_->compaction->immutable_options()->cf_paths,
+                       file_number, compact_->compaction->output_path_id());
+
+  std::unique_ptr<FSWritableFile> writable_file;
+
+  // TODO: What is temperature?
+  FileOptions fo_copy = file_options_;
+  Temperature temperature = sub_compact->compaction->output_temperature();
+  // only set for the last level compaction and also it's not output to
+  // penultimate level (when preclude_last_level feature is enabled)
+  if (temperature == Temperature::kUnknown &&
+      sub_compact->compaction->is_last_level() &&
+      !sub_compact->IsCurrentPenultimateLevel()) {
+    temperature =
+        sub_compact->compaction->mutable_cf_options()->last_level_temperature;
+  }
+  fo_copy.temperature = temperature;
+
+  Status s;
+  IOStatus io_s = NewWritableFile(fs_.get(), fname, &writable_file, fo_copy);
+  s = io_s;
+
+  // TODO: What do these do?
+  writable_file->SetIOPriority(GetRateLimiterPriority());
+  writable_file->SetWriteLifeTimeHint(write_hint_);
+  writable_file->SetPreallocationBlockSize(static_cast<size_t>(
+      sub_compact->compaction->OutputFilePreallocationSize()));
+
+  // TODO: What are listeners?
+  const auto& listeners =
+      sub_compact->compaction->immutable_options()->listeners;  
+
+  outputs.AssignFileWriter(new WritableFileWriter(
+      std::move(writable_file), fname, fo_copy, db_options_.clock, io_tracer_,
+      db_options_.stats, listeners, db_options_.file_checksum_gen_factory.get(),
+      false, false));
+
   return s;
 }
 
