@@ -68,6 +68,15 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
     io_s = file_writer_->Close();
   }
 
+  IOStatus parquet_io_s;
+  if (input_status.ok()) {
+    parquet_io_s = parquet_file_writer_->Sync(use_fsync);
+  }
+  if (input_status.ok() && parquet_io_s.ok()) {
+    parquet_io_s = parquet_file_writer_->Close();
+  }
+
+  // TODO: Add parquet file data to metadata
   if (input_status.ok() && io_s.ok()) {
     FileMetaData* meta = GetMetaData();
     meta->file_checksum = file_writer_->GetFileChecksum();
@@ -75,6 +84,7 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
   }
 
   file_writer_.reset();
+  parquet_file_writer.reset();
 
   return io_s;
 }
