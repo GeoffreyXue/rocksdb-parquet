@@ -1938,7 +1938,7 @@ Status CompactionJob::OpenCompactionOutputFile(SubcompactionState* sub_compact,
     std::string parquet_fname = GetParquetFileName(file_number);
     std::unique_ptr<FSWritableFile> parquet_writable_file;
     // Use same file options as sstable file
-    IOStatus io_s = NewWritableFile(fs_.get(), fname, &parquet_writable_file, fo_copy);
+    IOStatus parquet_io_s = NewWritableFile(fs_.get(), fname, &parquet_writable_file, fo_copy);
 
     parquet_writable_file->SetIOPriority(GetRateLimiterPriority());
     parquet_writable_file->SetWriteLifeTimeHint(write_hint_);

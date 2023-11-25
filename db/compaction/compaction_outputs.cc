@@ -84,7 +84,7 @@ IOStatus CompactionOutputs::WriterSyncClose(const Status& input_status,
   }
 
   file_writer_.reset();
-  parquet_file_writer.reset();
+  parquet_file_writer_.reset();
 
   return io_s;
 }
